@@ -89,7 +89,7 @@ bash run.sh
 ```shell
 CUDA_VISIBLE_DEVICES=0,1,2,3 python run_pipeline.py rank \
     --reranker <reranker_id> --gpu 0,1,2,3 \
-    --input /path/to/SetwiseEvalKit_short.jsonl --output-dir /path/to/output
+    --input /path/to/SetwiseEvalKit_short.jsonl --output-dir /path/to/output --top-k 5
 ```
 
 Replace `<reranker_id>` with any of:
@@ -103,12 +103,6 @@ Replace `<reranker_id>` with any of:
 | Set-selection (8B) | `setr`, `rank4gen` |
 | **Ours** | `rubric4setwise` (requires `hybrid_rubrics` in the input JSONL) |
 
-**BM25-only baseline (no reranker)**
-```shell
-python generate_bm25_baseline_cache.py \
-    --input /path/to/data_bm25top20.jsonl \
-    --output-dir /path/to/output/bm25-baseline --top-k 5
-```
 
 **Rubric4Setwise (ours)**
 ```shell
