@@ -1,0 +1,26 @@
+# Environment / secrets
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Local outputs / caches
+.cache/
+.cache-ts-*/
+logs/
+eval_output/
+eval_output_old/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store

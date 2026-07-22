@@ -1,0 +1,25 @@
+tool_parser: "v20250824"
+
+# Client config for the SearchAgent (SFT model)
+search_agent_model_name: "gpt-4.1-2025-04-14"
+search_agent_api_key: ${oc.env:OPENAI_API_KEY}
+search_agent_max_tokens: 32000
+search_agent_temperature: 1 # GPT-5 does not support temperature
+search_agent_max_tool_calls: 5
+
+# Client config for the browse/reader agent (general model)
+use_browse_agent: false
+browse_agent_model_name: "gpt-4.1-2025-04-14" # This should be the same name when you launch the VLLM backend.
+browse_agent_api_key: ${oc.env:OPENAI_API_KEY}
+browse_agent_max_tokens: 32000
+browse_agent_temperature: 1 # GPT-5 does not support temperature
+
+# Search tool configuration
+number_documents_to_search: 10
+search_timeout: 60
+
+# Browse tool configuration
+browse_tool_name: "jina"
+browse_timeout: 60
+browse_max_pages_to_fetch: 10
+browse_context_char_length: 6000
