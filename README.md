@@ -1,14 +1,10 @@
 
-<p align="center">
-  <img src="figs/tencent-color.svg" height="40px" alt="Tencent"/>
-  &nbsp;&nbsp;&nbsp;
-  <img src="figs/yuanbao-color.svg" height="40px" alt="Yuanbao"/>
-</p>
+
 
 <h1 align="center"> <a href="https://arxiv.org/------">Beyond Relevance-Centric Retrieval: Rubric-Oriented Document Set Selection and Ranking</a></h1>
 <h5 align="center">
 
-[![arXiv](https://img.shields.io/badge/Arxiv-2510.19316-b31b1b.svg?logo=arXiv)]() [![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-KORE-blue)](https://huggingface.co/datasets/kailinjiang/SetwiseEvalKit)  [![code](https://img.shields.io/badge/Code-KORE-blue?logo=github)](https://github.com/Rubric4Setwise/Rubric4Setwise)  [![website](https://img.shields.io/badge/Website-KORE-orange?logo=homepage)](https://rubric4setwise.github.io/) 
+[![arXiv](https://img.shields.io/badge/Arxiv-2510.19316-b31b1b.svg?logo=arXiv)]() [![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-Rubric4Setwise-blue)](https://huggingface.co/datasets/kailinjiang/SetwiseEvalKit)  [![code](https://img.shields.io/badge/Code-Rubric4Setwise-blue?logo=github)](https://github.com/Rubric4Setwise/Rubric4Setwise)  [![website](https://img.shields.io/badge/Website-Rubric4Setwise-orange?logo=homepage)](https://rubric4setwise.github.io/) 
 
 </h5>
 
