@@ -1,0 +1,41 @@
+name: rubric4setwise
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      # Rankify (with all optional extras: retrievers, generators, RAG, etc.)
+      - --ignore-installed
+      - blinker
+      - rankify[all]
+
+      # CUDA 12.4 PyTorch stack
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.5.1
+      - torchvision==0.20.1
+      - torchaudio==2.5.1
+
+      # LLM inference (Qwen3-compatible versions; see NOTE below)
+      - vllm==0.8.5
+      - transformers==4.51.3
+      - fastchat
+      - scipy==1.13.1
+
+      # flash-attn (built with --no-build-isolation; requires torch already installed)
+      - flash-attn
+
+# NOTE
+# ----
+# The versions above target Qwen3 (e.g. `Qwen/Qwen3-8B`, the default generator).
+#
+# If you instead want to run Qwen2.5-7B-Instruct as the reranker LLM, pin:
+#     transformers==4.45.2
+#     vllm==0.7.0
+# (fastchat and scipy==1.13.1 stay the same.)
+#
+# `flash-attn` must be installed AFTER torch, without build isolation:
+#     pip install flash-attn --no-build-isolation

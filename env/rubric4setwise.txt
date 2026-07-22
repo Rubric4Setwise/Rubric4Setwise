@@ -1,0 +1,44 @@
+# =============================================================================
+# Rubric4Setwise -- pip requirements
+#
+# Recommended install order (do NOT rely on a single `pip install -r` because
+# `flash-attn` requires torch to already be present when it builds):
+#
+#     # 1) Rankify + all its extras
+#     pip install "rankify[all]" --ignore-installed blinker
+#
+#     # 2) CUDA 12.4 PyTorch stack
+#     pip uninstall -y torch torchvision torchaudio
+#     pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+#         --index-url https://download.pytorch.org/whl/cu124
+#
+#     # 3) vLLM + transformers (Qwen3-compatible, see NOTE below)
+#     pip install vllm==0.8.5 transformers==4.51.3 fastchat scipy==1.13.1
+#
+#     # 4) flash-attn (must come AFTER torch; no build isolation)
+#     pip install flash-attn --no-build-isolation --force-reinstall
+#
+#     # 5) Uninstall stale apex if it exists
+#     pip uninstall -y apex
+#
+# NOTE
+# ----
+# The pinned versions target Qwen3 (default: Qwen/Qwen3-8B). For Qwen2.5-7B
+# use `transformers==4.45.2` and `vllm==0.7.0` instead.
+# =============================================================================
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+rankify[all]
+blinker
+
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+
+vllm==0.8.5
+transformers==4.51.3
+fastchat
+scipy==1.13.1
+
+flash-attn
