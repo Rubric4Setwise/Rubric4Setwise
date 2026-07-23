@@ -152,7 +152,7 @@ If you find our paper and code useful in your research, please consider giving a
 ```bibtex
 @article{jiang2026rubric4setwise,
   title = {Beyond Relevance-Centric Retrieval: Rubric-Oriented Document Set Selection and Ranking},
-  author={Kailin Jiang and Lei Liu and Jian Xi and Hui Xu and Junlin Liu and Baochen Fu and Shaoqing Ren and Bin Li and Vichwang and Yu Lu and Haibo Shi},
+  author={Kailin Jiang and Lei Liu and Jian Xi and Hui Xu and Junlin Liu and Baochen Fu and Bin Li and Vichwang and Yu Lu and Haibo Shi},
   journal={arXiv preprint arXiv:2607.19747},
   year={2026}
   url = {https://arxiv.org/abs/2607.19747}
