@@ -1,0 +1,10 @@
+# RankLLaMA pointwise scoring strings (not natural-language instructions).
+# Consumed by rankify/models/rankllama_reranker.py (RankLLaMAReranker.rank).
+# query_template    -> .format(query=<question>)
+# document_template -> .format(title_prefix=<title + single space, or "" when
+#                              the context has no title>, text=<passage text>)
+# The two rendered strings are passed as the sentence pair to the tokenizer.
+
+method: rankllama
+query_template: 'query: {query}'
+document_template: 'document: {title_prefix}{text}'

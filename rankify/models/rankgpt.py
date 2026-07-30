@@ -1,6 +1,7 @@
 import copy
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 from typing import List
 from rankify.utils.pre_defind_models import HF_PRE_DEFIND_MODELS, URL
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -8,6 +9,8 @@ import torch
 from tqdm import tqdm
 import time
 import gc
+
+_PROMPTS = load_reranker_prompts("rankgpt")
 
 
 class RankGPT(BaseRanking):
@@ -458,8 +461,8 @@ class RankGPT(BaseRanking):
             content = content.replace("Title: Content: ", "")
             content = content.strip()
             content = " ".join(content.split()[: int(max_length)])
-            messages.append({"role": "user", "content": f"[{rank}] {content}"})
-            messages.append({"role": "assistant", "content": f"Received passage [{rank}]."})
+            messages.append({"role": "user", "content": _PROMPTS["passage_user_template"].format(rank=rank, content=content)})
+            messages.append({"role": "assistant", "content": _PROMPTS["passage_assistant_template"].format(rank=rank)})
         messages.append({"role": "user", "content": self.get_post_prompt(query, num)})
         return messages
 
@@ -490,10 +493,10 @@ class RankGPT(BaseRanking):
 
     def get_prefix_prompt(self, query, num):
         return [{'role': 'system',
-                 'content': "You are RankGPT, an intelligent assistant that can rank passages based on their relevancy to the query."},
+                 'content': _PROMPTS["system_message"]},
                 {'role': 'user',
-                 'content': f"I will provide you with {num} passages, each indicated by number identifier []. \nRank the passages based on their relevance to query: {query}."},
-                {'role': 'assistant', 'content': 'Okay, please provide the passages.'}]
+                 'content': _PROMPTS["prefix_message"].format(num=num, query=query)},
+                {'role': 'assistant', 'content': _PROMPTS["assistant_acknowledgement"]}]
 
     def clean_response(self, response: str):
         new_response = ''
@@ -513,4 +516,4 @@ class RankGPT(BaseRanking):
         return new_response
 
     def get_post_prompt(self, query, num):
-        return f"Search Query: {query}. \nRank the {num} passages above based on their relevance to search query. The passages should be listed in descending order using identifiers. The most relevant passages should be listed first. The output format should be [] > [], e.g., [1] > [2]. Only response the ranking results, do not say any word or explain."
+        return _PROMPTS["post_message"].format(query=query, num=num)

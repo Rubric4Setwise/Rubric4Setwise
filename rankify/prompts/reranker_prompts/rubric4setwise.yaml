@@ -1,0 +1,52 @@
+# Rubric4Setwise prompts -- consumed by
+# rankify.models.rubric4setwise_reranker.Rubric4SetwiseReranker.
+#
+# Rubric-guided set selection: a single LLM call per query picks the minimum
+# passage set that satisfies every item of a pre-computed rubric attached to
+# `document.rubric`. `system_message` is the chat system turn, `user_message`
+# the user turn (built by Rubric4SetwiseReranker._build_selection_prompt).
+#
+# user_message placeholders:
+#   {query}   the search query
+#   {rubric}  rubric items rendered with `rubric_item_template`, joined by "\n"
+#   {context} candidate passages rendered with `context_item_template`,
+#             joined by "\n" (Rubric4SetwiseReranker._format_context, which
+#             also drops trailing passages once the token budget is exhausted)
+#
+# rubric_item_template placeholders: {index} 1-based item number, {item} item text
+# context_item_template placeholders: {index} 1-based passage id shown to the
+#   model, {text} the (possibly truncated) passage text
+#
+# Known quirk, kept on purpose: the two "### Final Selection" examples in Step 4
+# are each split across a real line break. The original Python literal was a
+# non-raw triple-quoted string, so its \n escapes became actual newlines instead
+# of the literal two characters the examples were meant to show. The reported
+# numbers were produced with these line breaks present; do not "fix" the
+# formatting without re-running the method.
+
+method: rubric4setwise
+system_message: You are a helpful assistant that selects relevant passages to answer queries.
+user_message: |
+  Your task is to select the minimum set of passages that can fully support answering the search query below.
+
+  Search Query: {query}
+
+  Rubric — A structured checklist of information requirements. Each rubric item has three fields:
+  - level: evaluation granularity (L1 = per-document quality, L2 = cross-document set quality, L3 = end-to-end answerability).
+  - type: the specific quality dimension being checked (e.g., Relevance, Complementarity, Completeness, Density, Reachability).
+  - item: a yes/no question that the selected passage set should satisfy.
+
+  {rubric}
+
+  Candidate Passages (each indicated by a numerical identifier []):
+  {context}
+
+  Please follow the steps below:
+  Step 1. For each rubric item, list which passage(s) contain information that satisfies it. If no passage satisfies a rubric item, write "NOT FOUND".
+  Step 2. Select the minimum set of passages that together satisfy ALL rubric items. Each selected passage must contribute at least one rubric item that other selected passages do not cover.
+  Step 3. If some rubric items are "NOT FOUND", still include the closest matching passages that partially address those items.
+  Step 4. Output the selected passages. The format of final output should be '### Final Selection: [] [].
+  ', e.g., '### Final Selection: [2] [1].
+  '.
+rubric_item_template: '{index}. {item}'
+context_item_template: '[{index}] {text}'

@@ -1,0 +1,48 @@
+# rankvicuna listwise reranking prompts.
+#
+# Consumed by rankify.utils.models.rank_llm.rerank.listwise.rank_listwise_os_llm.
+# RankListwiseOSLLM, selected via its `prompt_profile` kwarg, which
+# rankify/models/vicuna_reranker.py passes as "rankvicuna". Both presets share that one
+# implementation class, so this file is deliberately self-contained: it repeats
+# the shared listwise text instead of including the other profile's file.
+#
+# system_message  -- default system turn for this preset. null here: RankVicuna adds no system turn at all.
+#                    A caller-supplied `system_message` kwarg still overrides it.
+# prefix_message  -- opening user turn, emitted by _add_prefix_prompt().
+#                    `alpha` is used when use_alpha=True (identifiers A, B, C ...),
+#                    `numeric` otherwise (identifiers 1, 2, 3 ...).
+#                    Placeholders: {num} = number of passages in the window,
+#                    {query} = the (number-normalised) search query.
+# post_message    -- closing user turn, emitted by _add_post_prompt().
+#                    `template` placeholders: {query}, {num} as above, plus
+#                    {example_ordering} = the worked example of the output format.
+#                    example_ordering is keyed <identifier style>_<passage count>:
+#                    `alpha_*` when use_alpha=True, `numeric_*` otherwise;
+#                    `*_variable` when the class was built with
+#                    variable_passages=True, `*_fixed` otherwise.
+# passage_template-- one line per candidate passage, emitted inside create_prompt()
+#                    between the prefix and the post message. Placeholders:
+#                    {identifier} = "1"/"2"/... or "A"/"B"/... depending on
+#                    use_alpha, {content} = the truncated, number-normalised
+#                    passage text.
+#
+# Few-shot examples are NOT in this file: when num_few_shot_examples > 0 the class
+# samples raw conversations from the external data/output_v2_aug_filtered.jsonl,
+# which is not shipped with this repo, and appends them verbatim as extra
+# user/assistant turns.
+
+method: rankvicuna
+system_message: null
+prefix_message:
+  numeric: "I will provide you with {num} passages, each indicated by a numerical identifier []. Rank the passages based on their relevance to the search query: {query}.\n"
+  alpha: "I will provide you with {num} passages, each indicated by a alphabetical identifier []. Rank the passages based on their relevance to the search query: {query}.\n"
+post_message:
+  template: |-
+    Search Query: {query}.
+    Rank the {num} passages above based on their relevance to the search query. All the passages should be included and listed using identifiers, in descending order of relevance. The output format should be [] > [], e.g., {example_ordering}, Only respond with the ranking results, do not say any word or explain.
+  example_ordering:
+    numeric_fixed: '[4] > [2]'
+    numeric_variable: '[2] > [1]'
+    alpha_fixed: '[D] > [B]'
+    alpha_variable: '[B] > [A]'
+passage_template: "[{identifier}] {content}\n"

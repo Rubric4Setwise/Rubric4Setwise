@@ -1,12 +1,18 @@
 import torch
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 from rankify.utils.models.rank_llm.data import Request
 from rankify.utils.models.rank_llm.rerank.listwise import RankListwiseOSLLM
 from typing import List
 from rankify.utils.models.rank_llm.rerank import PromptMode
 from tqdm import tqdm  # Import tqdm for progress tracking
 import copy
+
+PROMPT_PROFILE = "rankzephyr"
+_PROMPTS = load_reranker_prompts(PROMPT_PROFILE)
+
+
 class ZephyrReranker(BaseRanking):
     """
     Implements **ZephyrReranker**, a **listwise ranking approach** designed for
@@ -80,8 +86,7 @@ class ZephyrReranker(BaseRanking):
         variable_passages: bool = kwargs.get("variable_passages", True)
         window_size: int = kwargs.get("window_size", 20)
         system_message: str = kwargs.get(
-            "system_message",
-            "You are RankLLM, an intelligent assistant that can rank passages based on their relevancy to the query",
+            "system_message", _PROMPTS["system_message"]
         )
         vllm_batched: bool = kwargs.get("vllm_batched", False)
         gpu_memory_utilization: float = kwargs.get("gpu_memory_utilization", 0.9)
@@ -100,6 +105,7 @@ class ZephyrReranker(BaseRanking):
             system_message=system_message,
             vllm_batched=vllm_batched,
             gpu_memory_utilization=gpu_memory_utilization,
+            prompt_profile=PROMPT_PROFILE,
         )
 
     def rank(self, documents: List[Document]) -> List[Document]:

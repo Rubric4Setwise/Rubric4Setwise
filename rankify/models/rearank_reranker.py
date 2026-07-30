@@ -19,6 +19,7 @@ from typing import List, Optional, Dict
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document, Context
+from rankify.prompts import load_reranker_prompts
 
 try:
     from vllm import LLM, SamplingParams
@@ -32,11 +33,14 @@ except ImportError:
     AutoTokenizer = None
 
 
-REARANK_SYSTEM_PROMPT = (
-    "You are DeepRerank, an intelligent assistant that can rank passages based on "
-    "their relevancy to the search query. You first thinks about the reasoning "
-    "process in the mind and then provides the user with the answer."
-)
+_PROMPTS = load_reranker_prompts("rearank-7b")
+
+REARANK_SYSTEM_PROMPT = _PROMPTS["system_message"]
+REARANK_INSTRUCTION_TEMPLATE = _PROMPTS["instruction_message"]
+REARANK_ASSISTANT_ACK = _PROMPTS["assistant_acknowledgement"]
+REARANK_PASSAGE_TEMPLATE = _PROMPTS["passage_message"]
+REARANK_PASSAGE_ACK_TEMPLATE = _PROMPTS["passage_acknowledgement"]
+REARANK_FINAL_RANKING_TEMPLATE = _PROMPTS["final_ranking_message"]
 
 
 class RearankReranker(BaseRanking):
@@ -128,42 +132,31 @@ class RearankReranker(BaseRanking):
         Create the Rearank multi-turn conversation format.
         """
         num = len(passages)
-        instruction = (
-            f"I will provide you with passages, each indicated by number identifier []. "
-            f"Rank the passages based on their relevance to the search query."
-            f"Search Query: {query}. \n"
-            f"Rank the {num} passages above based on their relevance to the search query."
-            f"The passages should be listed in descending order using identifiers. "
-            f"The most relevant passages should be listed first. "
-            f"The output format should be <answer> [] > [] </answer>, "
-            f"e.g., <answer> [1] > [2] </answer>."
-        )
+        instruction = REARANK_INSTRUCTION_TEMPLATE.format(query=query, num=num)
 
         messages = [
             {"role": "system", "content": REARANK_SYSTEM_PROMPT},
             {"role": "user", "content": instruction},
-            {"role": "assistant", "content": "Okay, please provide the passages."},
+            {"role": "assistant", "content": REARANK_ASSISTANT_ACK},
         ]
 
         # Add each passage with acknowledgment
         for rank, content in enumerate(passages, 1):
             content = content.replace('Title: Content: ', '').strip()
             content = ' '.join(content.split())
-            messages.append({"role": "user", "content": f"[{rank}] {content}"})
-            messages.append({"role": "assistant", "content": f"Received passage [{rank}]."})
+            messages.append({
+                "role": "user",
+                "content": REARANK_PASSAGE_TEMPLATE.format(rank=rank, content=content),
+            })
+            messages.append({
+                "role": "assistant",
+                "content": REARANK_PASSAGE_ACK_TEMPLATE.format(rank=rank),
+            })
 
         # Final ranking request
         messages.append({
             "role": "user",
-            "content": (
-                f'Please rank these passages according to their relevance to the search query: "{query}"\n'
-                f"Follow these steps exactly:\n"
-                f"1. First, within <think> tags, analyze EACH passage individually:\n"
-                f"- Evaluate how well it addresses the query\n"
-                f"- Note specific relevant information or keywords\n\n"
-                f"2. Then, within <answer> tags, provide ONLY the final ranking in "
-                f"descending order of relevance using the format: [X] > [Y] > [Z]"
-            ),
+            "content": REARANK_FINAL_RANKING_TEMPLATE.format(query=query),
         })
 
         return messages

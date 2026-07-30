@@ -24,7 +24,8 @@ Key features (merged from the earlier v1/v2 scripts):
   dimensions missing are repaired instead of being fully re-scored.
 - Final de-duplicating rewrite of the output JSONL and an Excel summary.
 
-Prompt template is kept in `scoring_prompt.txt` next to this script.
+Prompt template is kept in `prompts/rubric_scoring.yaml` next to this script
+(key `user_message`). `--prompt-file` also accepts a plain `.txt` template.
 
 Usage:
     python scoring.py <input.jsonl> <output.jsonl> \\
@@ -69,8 +70,10 @@ PARSE_MAX_RETRIES = 3
 DEFAULT_APP_ID = os.environ.get("LLM_APP_ID", "")
 DEFAULT_APP_KEY = os.environ.get("LLM_APP_KEY", "")
 
-DEFAULT_PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   "scoring_prompt.txt")
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+DEFAULT_PROMPT_FILE = os.path.join(PROMPTS_DIR, "rubric_scoring.yaml")
+# Key holding the template inside a prompt YAML.
+PROMPT_YAML_KEY = "user_message"
 
 # Rankers scored per entry (in this order); only rankers present in
 # selected_docs are actually scored.
@@ -133,6 +136,26 @@ def is_doc_level(dim: str) -> bool:
 # Prompt construction
 # ============================================================
 def load_prompt_template(path: str) -> str:
+    """Read the judge prompt template.
+
+    A `.yaml`/`.yml` file is read as a mapping and the `user_message` key is
+    returned; any other extension is treated as a raw template file, so a custom
+    plain-text prompt can still be passed via `--prompt-file`.
+    """
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Prompt template not found: {path}")
+
+    if path.endswith((".yaml", ".yml")):
+        import yaml
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict) or PROMPT_YAML_KEY not in data:
+            raise ValueError(
+                f"{path} must be a YAML mapping containing a '{PROMPT_YAML_KEY}' key"
+            )
+        return data[PROMPT_YAML_KEY]
+
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -857,7 +880,8 @@ def main():
     parser.add_argument("--base-url", type=str, default=DEFAULT_BASE_URL)
     parser.add_argument("--model",    type=str, default=DEFAULT_MODEL)
     parser.add_argument("--prompt-file", type=str, default=DEFAULT_PROMPT_FILE,
-                        help="Path to the prompt template (default: scoring_prompt.txt)")
+                        help="Prompt template: a YAML with a 'user_message' key "
+                             "(default: prompts/rubric_scoring.yaml) or a raw .txt template")
     parser.add_argument("--limit",  type=int, default=None, help="Max entries to process")
     parser.add_argument("--offset", type=int, default=0,    help="Start offset into the input file")
     parser.add_argument("--concurrency", type=int, default=5, help="Worker threads (default 5)")

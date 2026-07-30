@@ -12,6 +12,10 @@ rankify-index = "rankify.cli.cli:main"
 
 [tool.setuptools.package-data]
 "rankify.utils.retrievers.colbert.colbert.indexing.codecs" = ["*.cpp", "*.cu", "*.h"]
+# Prompt templates and generator descriptions are loaded at runtime, so they
+# have to ship with the package.
+"rankify.prompts.reranker_prompts" = ["*.yaml"]
+"rankify.models.rank4gen_descriptions" = ["*.json"]
 
 [project]
 name = "rankify"
@@ -48,6 +52,7 @@ dependencies  = [
   "httpx==0.27.2",
   "dacite==1.8.1",
   "ftfy==6.3.1",
+  "PyYAML>=6.0",        # prompt templates under rankify/prompts/
   
   # ML Core
   "transformers==4.45.2",

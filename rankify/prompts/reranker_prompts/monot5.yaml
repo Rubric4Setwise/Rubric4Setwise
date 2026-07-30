@@ -1,0 +1,9 @@
+# MonoT5 pointwise reranker prompt.
+# Consumed by rankify/models/monot5.py (MonoT5.inputs_template), applied per
+# candidate passage in MonoT5._get_scores via
+#   input_template.format(query=<question>, text=<passage text>)
+# The relevance score is read from the true/false logits of the first decoded
+# token, so the trailing "Relevant:" must stay exactly as-is.
+
+method: monot5
+input_template: 'Query: {query} Document: {text} Relevant:'

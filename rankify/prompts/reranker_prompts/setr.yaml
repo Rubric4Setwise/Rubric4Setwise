@@ -1,0 +1,57 @@
+# SetR prompts -- consumed by rankify.models.setr_reranker.SetRReranker.
+#
+# SetR ("Shifting from Ranking to Set Selection for Retrieval Augmented
+# Generation", ACL 2025) selects a subset of passages instead of ranking all of
+# them. `system_message` is sent as the chat system turn; one entry of
+# `user_messages` is sent as the user turn, picked by the reranker's
+# `prompt_mode` kwarg (the run_pipeline preset default is `selection_only`,
+# recorded below as `default_prompt_mode`; the class-level fallback when no
+# kwarg is given is `selection_IRI`).
+#
+# user_messages keys = the accepted values of `prompt_mode`:
+#   selection_IRI   3-step reasoning with Information Requirement Identification
+#   selection_woIRI chain-of-thought without explicit IRI
+#   selection_only  direct selection, no reasoning
+#
+# Placeholders (all three user messages):
+#   {num}      number of candidate passages shown
+#   {question} the search query
+#   {context}  passages joined by "\n\n\n", each rendered by
+#              SetRReranker._format_contexts as "[i] title: <title>\t<text>"
+#              (or "[i] <text>" when there is no title)
+
+method: setr
+default_prompt_mode: selection_only
+system_message: You are RankLLM, an intelligent assistant that can rank and select passages based on their relevancy to the query.
+user_messages:
+  selection_IRI: |-
+    I will provide you with {num} passages, each indicated by a numerical identifier []. Select the passages based on their relevance to the search query: {question}.
+
+    {context}
+
+
+    Search Query: {question}
+
+
+    Please follow the steps below:
+    Step 1. Please list up the information requirements to answer the query.
+    Step 2. for each requirement in Step 1, find the passages that has the information of the requirement.
+    Step 3. Choose the passages that mostly covers clear and diverse informations to answer the query. Number of passages is unlimited. The format of final output should be '### Final Selection: [] []', e.g., ### Final Selection: [4] [2].
+  selection_woIRI: |-
+    I will provide you with {num} passages, each indicated by a numerical identifier []. Select the passages based on their relevance to the search query: {question}.
+
+    {context}
+
+
+    Search Query: {question}
+
+
+    Select the passages that mostly covers clear and diverse informations to answer the query. Number of passages is unlimited. The format of final output should be '### Final Selection: [] []', e.g., ### Final Selection: [2] [1].
+    Let's think step by step.
+  selection_only: |-
+    I will provide you with {num} passages, each indicated by a numerical identifier []. Select the passages based on their relevance to the search query: {question}.
+
+    {context}
+
+    Search Query: {question}.
+    Select the passages that mostly covers clear and diverse informations to answer the query. Number of passages is unlimited. The format of final output should be '### Final Selection: [] []', e.g., ### Final Selection: [2] [1]. Only respond with the selection results, do not say any word or explain.

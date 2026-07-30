@@ -1,0 +1,26 @@
+# Setwise-SFT prompts (Setwise-SFT-3B / 7B / 14B LoRA adapters).
+# Consumed by rankify.models.rankr1_reranker.RankR1Reranker, which selects this
+# file instead of rankr1-7b.yaml when model_name is in SETWISE_SFT_MODELS.
+# Setwise-SFT is trained without a reasoning trace, so both the system message
+# and the answer_pattern expect <answer>...</answer> only, with no <think> block.
+#
+# system_message   : chat system turn, no placeholders.
+# user_message     : chat user turn. {query} = search query,
+#                    {docs} = the candidate group, already joined.
+# answer_pattern   : NOT a prompt. Regex applied to the lower-cased completion;
+#                    group(1) must be the selected label, e.g. "[3]".
+# doc_prefix       : per-document label, {num} = 1-based position in the group.
+# doc_separator    : string joining the labelled documents into {docs}.
+#
+# doc_prefix / doc_separator are byte-identical to rankr1-7b.yaml and are
+# repeated here so this file is self-contained.
+
+method: rankr1
+system_message: A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant provides the user with the answer enclosed within <answer> </answer> tags, i.e., <answer> answer here </answer>.
+user_message: |-
+  Given the query: "{query}", which of the following documents is most relevant?
+  {docs}
+  Please provide only the label of the most relevant document to the query, enclosed in square brackets, within the answer tags. For example, if the third document is the most relevant, the answer should be: <answer>[3]</answer>.
+answer_pattern: <answer>(.*?)</answer>
+doc_prefix: '[{num}]: '
+doc_separator: "\n"

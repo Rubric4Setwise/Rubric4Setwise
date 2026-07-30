@@ -1,0 +1,35 @@
+# ReasonRank listwise sliding-window prompts (liuwenhan/reasonrank-7B).
+# Consumed by rankify.models.reasonrank_reranker.ReasonRankReranker, which
+# assembles one user turn per window as:
+#   prefix_message + "\n" + passage_message * N + post_messages[<mode>]
+#
+# prompt_mode (constructor kwarg, default_prompt_mode below) selects:
+#   "reasoning" -> system_messages.reasoning, post_messages.reasoning
+#   "qwen3"     -> system_messages.standard,  post_messages.qwen3
+#   "standard"  -> system_messages.standard,  post_messages.standard
+# The sub-keys are exactly the strings the code compares prompt_mode against.
+#
+# {query}            : search query, after [n] -> (n) normalisation.
+# {num}              : number of passages in the current window.
+# {rank}             : 1-based passage index inside the window.
+# {content}          : truncated, ftfy-fixed passage text.
+# {example_ordering} : the example ranking shown to the model ("[2] > [1]").
+
+method: reasonrank
+default_prompt_mode: reasoning
+answer_pattern: <think>.*?</think>\s*<answer>(.*?)</answer>
+system_messages:
+  reasoning: You are RankLLM, an intelligent assistant that can rank passages based on their relevance to the query. Given a query and a passage list, you first thinks about the reasoning process in the mind and then provides the answer (i.e., the reranked passage list). The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
+  standard: You are RankLLM, an intelligent assistant that can rank passages based on their relevance to the query.
+prefix_message: "I will provide you with {num} passages, each indicated by a numerical identifier []. Rank the passages based on their relevance to the search query: {query}.\n"
+passage_message: "[{rank}] {content}\n"
+post_messages:
+  reasoning: |-
+    Search Query: {query}.
+    Rank the {num} passages above based on their relevance to the search query. All the passages should be included and listed using identifiers, in descending order of relevance. The format of the answer should be [] > [], e.g., {example_ordering}.
+  qwen3: |-
+    Search Query: {query}.
+    Rank the {num} passages above based on their relevance to the search query. All the passages should be included and listed using identifiers, in descending order of relevance. The final ranked list should be enclosed within <answer> </answer> tags, i.e., <answer> ranked list here </answer>. The format of ranked list should be [] > [], e.g., {example_ordering}. Only respond with the ranking results, do not say any word or explain.
+  standard: |-
+    Search Query: {query}.
+    Rank the {num} passages above based on their relevance to the search query. All the passages should be included and listed using identifiers, in descending order of relevance. The output format should be [] > [], e.g., {example_ordering}. Only respond with the ranking results, do not say any word or explain.

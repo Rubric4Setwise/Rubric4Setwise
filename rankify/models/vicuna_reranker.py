@@ -1,11 +1,15 @@
 import torch
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 from rankify.utils.models.rank_llm.data import Request
 from rankify.utils.models.rank_llm.rerank.listwise import RankListwiseOSLLM
 from typing import List
 from tqdm import tqdm  # Import tqdm for progress tracking
 import copy
+
+PROMPT_PROFILE = "rankvicuna"
+_PROMPTS = load_reranker_prompts(PROMPT_PROFILE)
 
 class VicunaReranker(BaseRanking):
     """
@@ -78,7 +82,7 @@ class VicunaReranker(BaseRanking):
         num_gpus: int = kwargs.get("num_gpus", 1) 
         variable_passages: bool = kwargs.get("variable_passages", False) 
         window_size: int = kwargs.get("window_size", 20)
-        system_message: str = kwargs.get("system_message", None)
+        system_message: str = kwargs.get("system_message", _PROMPTS["system_message"])
         vllm_batched: bool = kwargs.get("vllm_batched", False)
         gpu_memory_utilization: float = kwargs.get("gpu_memory_utilization", 0.9)
         
@@ -95,6 +99,7 @@ class VicunaReranker(BaseRanking):
             system_message=system_message,
             vllm_batched=vllm_batched,
             gpu_memory_utilization=gpu_memory_utilization,
+            prompt_profile=PROMPT_PROFILE,
         )
 
     def rank(self, documents: List[Document]) -> List[Document]:

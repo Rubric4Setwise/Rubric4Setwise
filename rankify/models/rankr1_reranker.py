@@ -27,6 +27,7 @@ from collections import Counter
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document, Context
+from rankify.prompts import load_reranker_prompts
 
 try:
     from vllm import LLM, SamplingParams
@@ -42,44 +43,20 @@ except ImportError:
     AutoTokenizer = None
 
 # Default prompt template (same as prompt_setwise-R1.toml)
-DEFAULT_SYSTEM_PROMPT = (
-    "A conversation between User and Assistant. The user asks a question, "
-    "and the Assistant solves it. The assistant first thinks about the reasoning "
-    "process in the mind and then provides the user with the answer. The reasoning "
-    "process and answer are enclosed within <think> </think> and <answer> </answer> "
-    "tags, respectively, i.e., <think> reasoning process here </think> "
-    "<answer> answer here </answer>."
-)
+_DEFAULT_PROMPTS = load_reranker_prompts("rankr1-7b")
 
-DEFAULT_USER_PROMPT = (
-    'Given the query: "{query}", which of the following documents is most relevant?\n'
-    '{docs}\n'
-    'After completing the reasoning process, please provide only the label of the '
-    'most relevant document to the query, enclosed in square brackets, within the '
-    'answer tags. For example, if the third document is the most relevant, the answer '
-    'should be: <think> reasoning process here </think> <answer>[3]</answer>.'
-)
-
-DEFAULT_PATTERN = r'<think>.*?</think>\s*<answer>(.*?)</answer>'
-DEFAULT_DOC_PREFIX = "[{num}]: "
-DEFAULT_DOC_SEPARATOR = "\n"
+DEFAULT_SYSTEM_PROMPT = _DEFAULT_PROMPTS["system_message"]
+DEFAULT_USER_PROMPT = _DEFAULT_PROMPTS["user_message"]
+DEFAULT_PATTERN = _DEFAULT_PROMPTS["answer_pattern"]
+DEFAULT_DOC_PREFIX = _DEFAULT_PROMPTS["doc_prefix"]
+DEFAULT_DOC_SEPARATOR = _DEFAULT_PROMPTS["doc_separator"]
 
 # ---- Setwise-SFT prompt (no reasoning, only <answer>) ----
-SETWISE_SFT_SYSTEM_PROMPT = (
-    "A conversation between User and Assistant. The user asks a question, "
-    "and the Assistant solves it. The assistant provides the user with the "
-    "answer enclosed within <answer> </answer> tags, i.e., <answer> answer here </answer>."
-)
+_SETWISE_SFT_PROMPTS = load_reranker_prompts("setwise-sft-7b")
 
-SETWISE_SFT_USER_PROMPT = (
-    'Given the query: "{query}", which of the following documents is most relevant?\n'
-    '{docs}\n'
-    'Please provide only the label of the most relevant document to the query, '
-    'enclosed in square brackets, within the answer tags. For example, if the third '
-    'document is the most relevant, the answer should be: <answer>[3]</answer>.'
-)
-
-SETWISE_SFT_PATTERN = r'<answer>(.*?)</answer>'
+SETWISE_SFT_SYSTEM_PROMPT = _SETWISE_SFT_PROMPTS["system_message"]
+SETWISE_SFT_USER_PROMPT = _SETWISE_SFT_PROMPTS["user_message"]
+SETWISE_SFT_PATTERN = _SETWISE_SFT_PROMPTS["answer_pattern"]
 
 # ---- LoRA adapter → base model mapping ----
 # These models are LoRA adapters that need a base model for inference.

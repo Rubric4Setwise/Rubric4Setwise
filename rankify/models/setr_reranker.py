@@ -36,57 +36,24 @@ from tqdm import tqdm
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 
 
 # =========================================================
 # Prompt Templates (from SetR paper / official code)
+# Text lives in rankify/prompts/reranker_prompts/setr.yaml
 # =========================================================
 
-SETR_SYSTEM_PROMPT = (
-    "You are RankLLM, an intelligent assistant that can rank and select "
-    "passages based on their relevancy to the query."
-)
+_PROMPTS = load_reranker_prompts("setr")
 
-# --- selection_IRI: 3-step reasoning with Information Requirement Identification ---
-SELECTION_IRI_PROMPT = """I will provide you with {num} passages, each indicated by a numerical identifier []. Select the passages based on their relevance to the search query: {question}.
+SETR_SYSTEM_PROMPT = _PROMPTS["system_message"]
 
-{context}
+# Keyed by prompt_mode; see the YAML for what each mode does.
+PROMPT_TEMPLATES = dict(_PROMPTS["user_messages"])
 
-
-Search Query: {question}
-
-
-Please follow the steps below:
-Step 1. Please list up the information requirements to answer the query.
-Step 2. for each requirement in Step 1, find the passages that has the information of the requirement.
-Step 3. Choose the passages that mostly covers clear and diverse informations to answer the query. Number of passages is unlimited. The format of final output should be '### Final Selection: [] []', e.g., ### Final Selection: [4] [2]."""
-
-# --- selection_woIRI: CoT without explicit IRI ---
-SELECTION_WOIRI_PROMPT = """I will provide you with {num} passages, each indicated by a numerical identifier []. Select the passages based on their relevance to the search query: {question}.
-
-{context}
-
-
-Search Query: {question}
-
-
-Select the passages that mostly covers clear and diverse informations to answer the query. Number of passages is unlimited. The format of final output should be '### Final Selection: [] []', e.g., ### Final Selection: [2] [1].
-Let's think step by step."""
-
-# --- selection_only: direct selection without reasoning ---
-SELECTION_ONLY_PROMPT = """I will provide you with {num} passages, each indicated by a numerical identifier []. Select the passages based on their relevance to the search query: {question}.
-
-{context}
-
-Search Query: {question}.
-Select the passages that mostly covers clear and diverse informations to answer the query. Number of passages is unlimited. The format of final output should be '### Final Selection: [] []', e.g., ### Final Selection: [2] [1]. Only respond with the selection results, do not say any word or explain."""
-
-
-PROMPT_TEMPLATES = {
-    "selection_IRI": SELECTION_IRI_PROMPT,
-    "selection_woIRI": SELECTION_WOIRI_PROMPT,
-    "selection_only": SELECTION_ONLY_PROMPT,
-}
+SELECTION_IRI_PROMPT = PROMPT_TEMPLATES["selection_IRI"]
+SELECTION_WOIRI_PROMPT = PROMPT_TEMPLATES["selection_woIRI"]
+SELECTION_ONLY_PROMPT = PROMPT_TEMPLATES["selection_only"]
 
 
 # =========================================================

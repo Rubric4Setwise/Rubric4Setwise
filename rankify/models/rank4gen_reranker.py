@@ -39,6 +39,7 @@ from tqdm import tqdm
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document, Context
+from rankify.prompts import load_reranker_prompts
 
 
 # =========================================================
@@ -57,112 +58,21 @@ IM_END = "<|im_end|>\n"
 
 # =========================================================
 # Prompt Templates
+# Text lives in rankify/prompts/reranker_prompts/rank4gen.yaml
 # =========================================================
 
-EN_SYSTEM_PROMPT_TEMPLATE = """You are **Rank4Gen**, a **Ranker** designed for retrieval-augmented generation tasks.
-Given a **Query (<Query>)** and **Candidate Documents (<Documents>)**, you need to **select and rank** the documents from a set of candidate documents that are most suitable for the downstream generator to answer the query, based on the characteristics and preferences of **Downstream Generator Information**.
+_PROMPTS = load_reranker_prompts("rank4gen")
 
-When the downstream generator is `default`, it indicates a default mode with no specific preferences. In this case, you should **select and rank** the candidate documents that are **most helpful for the query** and **most directly support answering it**.
-
-Please **strictly follow** the **Instructions (<Instruct>)** below for document selection and ranking.
-
----
-
-## Downstream Generator Information
-
-The downstream generator you serve is: `{downstream_model}`  
-Generator description: `{description}`
-
----
-
-## Output Mode
-
-### 1. Index Mode
-If the instruction contains **`/index`**, output only the **document index**, one per line, without additional text or explanation.
-
-**Example:**
-[<doc_index_1>]
-[<doc_index_2>]
-[<doc_index_3>]
-
-### 2. Snapshot Mode
-If the instruction contains **`/snapshot`**, output the selected documents **line by line** using *snapshot format*.  
-Each line must include:
-
-- **Document index**  
-- **Preview of the first 100 characters** of the document content  
-
-**Example:**
-[<doc_index_1>] <first_100_characters_of_document>...
-[<doc_index_2>] <first_100_characters_of_document>...
-[<doc_index_3>] <first_100_characters_of_document>..."""
-
-EN_USER_PROMPT_TEMPLATE = """<Instruct>: I will provide you with {num} documents, each indicated by a numerical identifier []. Select the documents based on their relevance to the search query "{question}".
-
-<Query>: {question}
-
-<Documents>: 
-{context}
-
-Select the documents that mostly cover clear and diverse information to answer the query.
-
-Please output the final document selection and sorting results according to the format constraints of the **"Output Mode"**.
-
-<Output>:"""
-
-ZH_SYSTEM_PROMPT_TEMPLATE = """你是**Rank4Gen**，一个检索增强生成任务的**Ranker**。  
-给定**查询 (<Query>)**与**候选文档 (<Documents>)**，你需要根据**下游生成器信息**的特点和偏好，从候选文档中**筛选并排序**出最适合该生成器回答的文档。
-
-当下游生成器为`default`时，代表无偏好的默认模式，你需要从候选文档中**选择并排序**出**对该查询最有帮助**、**最能直接支持回答**的文档。
-
-请**严格按照**下方的**指令 (<Instruct>)**进行文档选择与排序。
-
----
-
-## 下游生成器信息
-
-你所服务的下游生成器是：`{downstream_model}`
-生成器描述：`{description}`
-
----
-
-## 输出模式
-
-### 1. Index 模式
-如果指令中包含 ** `/index`**，则仅输出 **文档索引**，每行一个，不添加任何解释或额外文本。
-
-**示例:**
-[<doc_index_1>]
-[<doc_index_2>]
-[<doc_index_3>]
-
-### 2. Snapshot 模式
-如果指令中包含 **`/snapshot`**，请使用 *snapshot 格式* **逐行输出**所选文档。  
-每行必须包括：
-
-- **文档索引**  
-- **文档内容前 100 个字符的预览**
-
-**示例：**
-[<doc_index_1>] <first_100_characters_of_document>...
-[<doc_index_2>] <first_100_characters_of_document>...
-[<doc_index_3>] <first_100_characters_of_document>..."""
-
-ZH_USER_PROMPT_TEMPLATE = """<Instruct>: 我将向你提供 {num} 个文档，每个文档都有一个数字标识符 []。请根据它们与搜索查询"{question}"的相关性选择段落。
-
-<Query>: {question}
-
-<Documents>:
-{context}
-
-请选择那些能够提供清晰且多样信息、最能回答查询的文档。
-
-请根据 "输出模式" 的格式要求输出最终的文档选择和排序结果。
-
-<Output>: """
+EN_SYSTEM_PROMPT_TEMPLATE = _PROMPTS["system_messages"]["en"]
+EN_USER_PROMPT_TEMPLATE = _PROMPTS["user_messages"]["en"]
+ZH_SYSTEM_PROMPT_TEMPLATE = _PROMPTS["system_messages"]["zh"]
+ZH_USER_PROMPT_TEMPLATE = _PROMPTS["user_messages"]["zh"]
 
 SYSTEM_TEMPLATES = {"en": EN_SYSTEM_PROMPT_TEMPLATE, "zh": ZH_SYSTEM_PROMPT_TEMPLATE}
 USER_TEMPLATES = {"en": EN_USER_PROMPT_TEMPLATE, "zh": ZH_USER_PROMPT_TEMPLATE}
+
+# Output-mode suffix appended to the rendered user message: "index" | "snapshot"
+MODE_TAGS = dict(_PROMPTS["mode_tags"])
 
 # Default model descriptions (fallback when description file is not found)
 DEFAULT_DESCRIPTIONS = {
@@ -253,7 +163,7 @@ def _build_user_prompt_with_truncation(
     documents: List[Dict[str, Any]],
     mode: str,
 ) -> str:
-    mode_tag = "/index" if mode == "index" else "/snapshot"
+    mode_tag = MODE_TAGS["index"] if mode == "index" else MODE_TAGS["snapshot"]
     suffix = "\n" + mode_tag
 
     placeholder_context = "<CTX>"

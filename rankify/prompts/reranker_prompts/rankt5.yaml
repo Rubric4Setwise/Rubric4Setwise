@@ -1,0 +1,9 @@
+# RankT5 pointwise reranker prompts (two presets).
+# Consumed by rankify/models/rankt5.py (RankT5.rank). The template is picked by
+# self.mode: "monot5" -> monot5_input_template (score from yes/no logits),
+# "rankt5" -> rankt5_input_template (score from the <extra_id_10> logit).
+# Both are filled with .format(query=<question>, text=<passage text>).
+
+method: rankt5
+monot5_input_template: 'Query: {query} Document: {text} Relevant:'
+rankt5_input_template: 'Query: {query} Document: {text}'

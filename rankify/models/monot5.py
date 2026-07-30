@@ -6,12 +6,16 @@ from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document, Context
 from rankify.utils.helper import get_device
 from rankify.utils.pre_defind_models import PREDICTION_TOKENS
+from rankify.prompts import load_reranker_prompts
 import torch
 from tqdm import tqdm
 from math import ceil
 import copy
 
 logger = logging.getLogger(__name__)
+
+_PROMPTS = load_reranker_prompts("monot5")
+INPUT_TEMPLATE = _PROMPTS["input_template"]
 
 class MonoT5(BaseRanking):
     def __init__(self, method=None, model_name=None, **kwargs):
@@ -21,8 +25,8 @@ class MonoT5(BaseRanking):
         self.batch_size = kwargs.get("batch_size", 32)
         self.use_amp = kwargs.get("use_amp", torch.cuda.is_available())
         if "inputs_template" in kwargs:
-            logger.warning("Custom inputs_template is ignored for MonoT5. Using default: 'Query: {query} Document: {text} Relevant:'")
-        self.inputs_template = "Query: {query} Document: {text} Relevant:"
+            logger.warning(f"Custom inputs_template is ignored for MonoT5. Using default: '{INPUT_TEMPLATE}'")
+        self.inputs_template = INPUT_TEMPLATE
         self.return_logits = kwargs.get("return_logits", False)
 
         # Initialize tokenizer and model

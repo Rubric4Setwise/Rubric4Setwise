@@ -1,0 +1,35 @@
+# Rearank listwise sliding-window prompts (le723z/Rearank-7B).
+# Consumed by rankify.models.rearank_reranker.RearankReranker._create_messages,
+# which builds one multi-turn conversation per sliding window in this order:
+#   system    <- system_message
+#   user      <- instruction_message
+#   assistant <- assistant_acknowledgement
+#   then, for every passage in the window:
+#     user      <- passage_message
+#     assistant <- passage_acknowledgement
+#   user      <- final_ranking_message
+#
+# {query}   : the search query.
+# {num}     : number of passages in the current window.
+# {rank}    : 1-based passage index inside the window.
+# {content} : whitespace-normalised passage text.
+#
+# Rearank has a single prompt set; there is no prompt_mode switch.
+# Note: instruction_message deliberately keeps the upstream spacing quirks
+# ("search query.Search Query:" with no space, and a trailing space before the
+# newline). Do not "fix" them - the model was trained on this exact text.
+
+method: rearank
+system_message: You are DeepRerank, an intelligent assistant that can rank passages based on their relevancy to the search query. You first thinks about the reasoning process in the mind and then provides the user with the answer.
+instruction_message: "I will provide you with passages, each indicated by number identifier []. Rank the passages based on their relevance to the search query.Search Query: {query}. \nRank the {num} passages above based on their relevance to the search query.The passages should be listed in descending order using identifiers. The most relevant passages should be listed first. The output format should be <answer> [] > [] </answer>, e.g., <answer> [1] > [2] </answer>."
+assistant_acknowledgement: Okay, please provide the passages.
+passage_message: '[{rank}] {content}'
+passage_acknowledgement: Received passage [{rank}].
+final_ranking_message: |-
+  Please rank these passages according to their relevance to the search query: "{query}"
+  Follow these steps exactly:
+  1. First, within <think> tags, analyze EACH passage individually:
+  - Evaluate how well it addresses the query
+  - Note specific relevant information or keywords
+
+  2. Then, within <answer> tags, provide ONLY the final ranking in descending order of relevance using the format: [X] > [Y] > [Z]

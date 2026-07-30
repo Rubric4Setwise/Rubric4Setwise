@@ -1,0 +1,13 @@
+# Rank1 pointwise reasoning reranker prompt.
+# Consumed by rankify/models/rank1_reranker.py (Rank1Reranker._build_prompt) via
+#   pointwise_prompt.format(query=<question>, passage=<truncated passage>)
+# The prompt must end with "\n<think>" and no trailing newline: generation is
+# stopped at "</think> true"/"</think> false" and the score comes from those
+# token logprobs.
+
+method: rank1
+pointwise_prompt: |-
+  Determine if the following passage is relevant to the query. Answer only with 'true' or 'false'.
+  Query: {query}
+  Passage: {passage}
+  <think>

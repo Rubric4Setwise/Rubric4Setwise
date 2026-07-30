@@ -7,6 +7,11 @@ from tqdm import tqdm
 
 from rankify.dataset.dataset import Context, Document
 from rankify.models.base import BaseRanking
+from rankify.prompts import load_reranker_prompts
+
+_PROMPTS = load_reranker_prompts("rankllama")
+QUERY_TEMPLATE = _PROMPTS["query_template"]
+DOCUMENT_TEMPLATE = _PROMPTS["document_template"]
 
 try:
     from peft import PeftConfig, PeftModel
@@ -143,9 +148,12 @@ class RankLLaMAReranker(BaseRanking):
             contexts = copy.deepcopy(document.contexts)
 
             # Build query strings and document strings
-            query_texts = [f"query: {query}"] * len(contexts)
+            query_texts = [QUERY_TEMPLATE.format(query=query)] * len(contexts)
             doc_texts = [
-                f"document: {ctx.title + ' ' if ctx.title else ''}{ctx.text}"
+                DOCUMENT_TEMPLATE.format(
+                    title_prefix=ctx.title + ' ' if ctx.title else '',
+                    text=ctx.text,
+                )
                 for ctx in contexts
             ]
 

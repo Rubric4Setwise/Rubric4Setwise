@@ -2,12 +2,19 @@
 ###############################################################################
 # Short-Form Reranker Pipeline
 #
-# Two phases:
-#   1. Ranking     - each reranker shards the dataset across N GPUs, then merges
-#   2. Generation  - a reranker x generator matrix is scheduled onto free GPUs
+# Three phases, both GPU phases are data-parallel and run one job at a time:
+#   1. Ranking     - per reranker: shard the dataset across N GPUs, merge, score
+#   2. Generation  - per reranker x generator: shard across N GPUs, merge, score
 #   3. Summarize   - aggregate metrics across all rerankers
 #
+# Every GPU loads its own full copy of the model and handles 1/N of the data;
+# jobs are processed strictly one after another, so a job always has all N GPUs.
+#
 # Usage:  bash run.sh
+#
+# Note: after changing NUM_GPUS, delete any leftover ranker_cache_shard_*.jsonl
+# and output_shard_*.jsonl first — stale shards were cut for a different
+# num_shards and merging them would duplicate or drop entries.
 ###############################################################################
 
 set -u
@@ -28,7 +35,7 @@ NUM_GPUS=4
 GPU_IDS=(0 1 2 3)
 
 # Generator
-GENERATORS=("Qwen/Qwen3-8B")
+GENERATORS=("meta-llama/Llama-3.1-8B-Instruct")
 GENERATOR_METHOD="basic-rag"
 GENERATOR_BACKEND="vllm"
 MAX_MODEL_LEN=4096
@@ -82,30 +89,6 @@ ok()    { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[$(date '+%H:%M:%S')]${NC} $*"; }
 err()   { echo -e "${RED}[$(date '+%H:%M:%S')]${NC} $*"; }
 phase() { echo -e "\n${CYAN}==== $* ====${NC}\n"; }
-
-declare -a GPU_PIDS
-for i in $(seq 0 $((NUM_GPUS - 1))); do GPU_PIDS[$i]=0; done
-
-wait_for_free_gpu() {
-    while true; do
-        for i in $(seq 0 $((NUM_GPUS - 1))); do
-            pid=${GPU_PIDS[$i]}
-            if [ "$pid" -eq 0 ]; then FREE_GPU_IDX=$i; return; fi
-            if ! kill -0 "$pid" 2>/dev/null; then
-                wait "$pid" 2>/dev/null || true
-                GPU_PIDS[$i]=0; FREE_GPU_IDX=$i; return
-            fi
-        done
-        sleep 5
-    done
-}
-
-wait_all_gpus() {
-    for i in $(seq 0 $((NUM_GPUS - 1))); do
-        pid=${GPU_PIDS[$i]}
-        if [ "$pid" -ne 0 ]; then wait "$pid" 2>/dev/null || true; GPU_PIDS[$i]=0; fi
-    done
-}
 
 # ============================================================
 # Phase 1: Ranking (data-parallel shards per reranker)
@@ -163,43 +146,65 @@ done
 ok "Ranking done in $(( ($(date +%s) - RANK_START) / 60 )) min"
 
 # ============================================================
-# Phase 2: Generation
+# Phase 2: Generation (data-parallel shards per reranker x generator)
 # ============================================================
-phase "PHASE 2: GENERATION  ($((${#RERANKERS[@]} * ${#GENERATORS[@]})) jobs on ${NUM_GPUS} GPUs)"
+phase "PHASE 2: GENERATION  ($((${#RERANKERS[@]} * ${#GENERATORS[@]})) jobs x ${NUM_GPUS} shards)"
 GEN_START=$(date +%s)
-for i in $(seq 0 $((NUM_GPUS - 1))); do GPU_PIDS[$i]=0; done
 
 for reranker in "${RERANKERS[@]}"; do
     for generator in "${GENERATORS[@]}"; do
+        GEN_NAME="${generator##*/}"
         GEN_DIR="${generator//\//_}"
-        OUT_FILE="${OUTPUT_DIR}/${reranker}/${GEN_DIR}/${OUTPUT_FILENAME}"
-        [ -f "$OUT_FILE" ] && { log "skip ${reranker}+${generator##*/}"; continue; }
+        GEN_OUT_DIR="${OUTPUT_DIR}/${reranker}/${GEN_DIR}"
+        OUT_FILE="${GEN_OUT_DIR}/${OUTPUT_FILENAME}"
+        [ -f "$OUT_FILE" ] && { log "skip ${reranker}+${GEN_NAME}"; continue; }
 
         CACHE_FILE="${OUTPUT_DIR}/${reranker}/ranker_cache.jsonl"
         [ ! -f "$CACHE_FILE" ] && { warn "no cache for ${reranker}"; continue; }
 
-        wait_for_free_gpu
-        GPU_ID=${GPU_IDS[$FREE_GPU_IDX]}
-        LOG_FILE="${LOG_DIR}/gen_${reranker}_${generator##*/}.log"
+        log "Generating with ${reranker}+${GEN_NAME}"
 
-        GEN_CMD=(python "${PYTHON_SCRIPT}" generate
-            --reranker "$reranker" --generator "$generator" --gpu "$GPU_ID"
-            --input "$INPUT_FILE" --output-dir "$OUTPUT_DIR"
-            --num-entries "$NUM_ENTRIES"
-            --generator-method "$GENERATOR_METHOD" --generator-backend "$GENERATOR_BACKEND"
-            --max-model-len "$MAX_MODEL_LEN" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
-            --top-k "$TOP_K" --max-tokens "$MAX_TOKENS"
-            --temperature "$TEMPERATURE" --top-p "$TOP_P"
-            --repetition-penalty "$REPETITION_PENALTY")
-        [ "$EVALUATE_METRICS" = "true" ] && GEN_CMD+=(--evaluate-metrics) || GEN_CMD+=(--no-evaluate-metrics)
-        [ "$SAVE_INDIVIDUAL_SCORES" = "true" ] && GEN_CMD+=(--save-individual-scores) || GEN_CMD+=(--no-save-individual-scores)
+        declare -a GEN_PIDS; GEN_FAIL=0
+        for shard_id in $(seq 0 $((NUM_GPUS - 1))); do
+            GPU_ID=${GPU_IDS[$shard_id]}
+            SHARD_FILE="${GEN_OUT_DIR}/output_shard_${shard_id}.jsonl"
+            if [ -f "$SHARD_FILE" ]; then GEN_PIDS[$shard_id]=0; continue; fi
 
-        CUDA_VISIBLE_DEVICES="$GPU_ID" "${GEN_CMD[@]}" > "$LOG_FILE" 2>&1 &
-        GPU_PIDS[$FREE_GPU_IDX]=$!
-        log "submit ${reranker}+${generator##*/} -> GPU ${GPU_ID} (pid=${GPU_PIDS[$FREE_GPU_IDX]})"
+            LOG_FILE="${LOG_DIR}/gen_${reranker}_${GEN_NAME}_shard${shard_id}.log"
+            CUDA_VISIBLE_DEVICES="$GPU_ID" python "${PYTHON_SCRIPT}" generate \
+                --reranker "$reranker" --generator "$generator" --gpu "$GPU_ID" \
+                --input "$INPUT_FILE" --output-dir "$OUTPUT_DIR" \
+                --num-entries "$NUM_ENTRIES" \
+                --generator-method "$GENERATOR_METHOD" --generator-backend "$GENERATOR_BACKEND" \
+                --max-model-len "$MAX_MODEL_LEN" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+                --top-k "$TOP_K" --max-tokens "$MAX_TOKENS" \
+                --temperature "$TEMPERATURE" --top-p "$TOP_P" \
+                --repetition-penalty "$REPETITION_PENALTY" \
+                --shard-id "$shard_id" --num-shards "$NUM_GPUS" \
+                --no-evaluate-metrics > "$LOG_FILE" 2>&1 &
+            GEN_PIDS[$shard_id]=$!
+            log "  shard ${shard_id} -> GPU ${GPU_ID} (pid=${GEN_PIDS[$shard_id]})"
+        done
+
+        for shard_id in $(seq 0 $((NUM_GPUS - 1))); do
+            pid=${GEN_PIDS[$shard_id]}
+            if [ "$pid" -ne 0 ]; then
+                wait "$pid" 2>/dev/null
+                [ $? -ne 0 ] && { err "  shard ${shard_id} failed"; GEN_FAIL=1; }
+            fi
+        done
+        unset GEN_PIDS
+        [ "$GEN_FAIL" -eq 1 ] && { err "${reranker}+${GEN_NAME} failed, skip merge"; continue; }
+
+        GEN_MERGE_CMD=(python "${PYTHON_SCRIPT}" merge-gen-shards
+            --reranker "$reranker" --generator "$generator"
+            --output-dir "$OUTPUT_DIR" --num-shards "$NUM_GPUS" --top-k "$TOP_K")
+        [ "$EVALUATE_METRICS" = "true" ] && GEN_MERGE_CMD+=(--evaluate-metrics) || GEN_MERGE_CMD+=(--no-evaluate-metrics)
+        [ "$SAVE_INDIVIDUAL_SCORES" = "true" ] && GEN_MERGE_CMD+=(--save-individual-scores) || GEN_MERGE_CMD+=(--no-save-individual-scores)
+        "${GEN_MERGE_CMD[@]}" > "${LOG_DIR}/gen_${reranker}_${GEN_NAME}_merge.log" 2>&1 \
+            && ok "  ${reranker}+${GEN_NAME} done" || err "  ${reranker}+${GEN_NAME} merge failed"
     done
 done
-wait_all_gpus
 ok "Generation done in $(( ($(date +%s) - GEN_START) / 60 )) min"
 
 # ============================================================

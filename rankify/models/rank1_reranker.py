@@ -17,6 +17,10 @@ from typing import List, Optional, Tuple
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document, Context
+from rankify.prompts import load_reranker_prompts
+
+_PROMPTS = load_reranker_prompts("rank1-7b")
+POINTWISE_PROMPT = _PROMPTS["pointwise_prompt"]
 
 try:
     from vllm import LLM, SamplingParams
@@ -117,13 +121,7 @@ class Rank1Reranker(BaseRanking):
 
     def _build_prompt(self, query: str, passage: str) -> str:
         """Build the pointwise prompt."""
-        return (
-            "Determine if the following passage is relevant to the query. "
-            "Answer only with 'true' or 'false'.\n"
-            f"Query: {query}\n"
-            f"Passage: {passage}\n"
-            "<think>"
-        )
+        return POINTWISE_PROMPT.format(query=query, passage=passage)
 
     def _fix_incomplete_responses(
         self,
@@ -242,6 +240,10 @@ class Rank1Reranker(BaseRanking):
             if not contexts:
                 continue
 
+            # NOTE: this is the Question object, not doc.question.question as every
+            # other reranker uses, so Question.__str__ puts a literal "Question: "
+            # in front of the query inside the prompt. Kept as-is on purpose: the
+            # reported rank1-7b numbers were produced with this prefix present.
             query = doc.question
 
             # Build prompts for all contexts

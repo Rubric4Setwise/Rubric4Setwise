@@ -6,10 +6,15 @@ from pathlib import Path
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 from typing import List
 import copy
 from tqdm import tqdm  # Import tqdm for progress tracking
 import copy
+
+_PROMPTS = load_reranker_prompts("rankt5")
+MONOT5_INPUT_TEMPLATE = _PROMPTS["monot5_input_template"]
+RANKT5_INPUT_TEMPLATE = _PROMPTS["rankt5_input_template"]
 
 class RankT5(BaseRanking):
     """
@@ -127,9 +132,9 @@ class RankT5(BaseRanking):
 
             # Prepare input texts based on the selected mode
             if self.mode == 'monot5':
-                input_texts = [f"Query: {query} Document: {x.text} Relevant:" for x in passages]
+                input_texts = [MONOT5_INPUT_TEMPLATE.format(query=query, text=x.text) for x in passages]
             elif self.mode == 'rankt5':
-                input_texts = [f"Query: {query} Document: {x.text}" for x in passages]
+                input_texts = [RANKT5_INPUT_TEMPLATE.format(query=query, text=x.text) for x in passages]
 
             # Group inputs into batches
             grouped_input_texts = list(self.group2chunks(input_texts, n=self.batch_size))

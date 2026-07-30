@@ -40,6 +40,7 @@ from ftfy import fix_text
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 
 try:
     from vllm import LLM, SamplingParams
@@ -52,24 +53,21 @@ except ImportError:
 # Prompt Templates (from ReasonRank paper)
 # =========================================================
 
+_PROMPTS = load_reranker_prompts("reasonrank-7b")
+
 # System prompt for reasoning mode
-REASONRANK_SYSTEM_PROMPT_REASONING = (
-    "You are RankLLM, an intelligent assistant that can rank passages based on "
-    "their relevance to the query. Given a query and a passage list, you first "
-    "thinks about the reasoning process in the mind and then provides the answer "
-    "(i.e., the reranked passage list). The reasoning process and answer are "
-    "enclosed within <think> </think> and <answer> </answer> tags, respectively, "
-    "i.e., <think> reasoning process here </think> <answer> answer here </answer>."
-)
+REASONRANK_SYSTEM_PROMPT_REASONING = _PROMPTS["system_messages"]["reasoning"]
 
 # System prompt for standard (non-reasoning) mode
-REASONRANK_SYSTEM_PROMPT_STANDARD = (
-    "You are RankLLM, an intelligent assistant that can rank passages based on "
-    "their relevance to the query."
-)
+REASONRANK_SYSTEM_PROMPT_STANDARD = _PROMPTS["system_messages"]["standard"]
+
+REASONRANK_PREFIX_TEMPLATE = _PROMPTS["prefix_message"]
+REASONRANK_PASSAGE_TEMPLATE = _PROMPTS["passage_message"]
+# prompt_mode -> post prompt; keys match the values compared in _add_post_prompt
+REASONRANK_POST_TEMPLATES = _PROMPTS["post_messages"]
 
 # Pattern to extract answer from reasoning output
-REASONING_PATTERN = r'<think>.*?</think>\s*<answer>(.*?)</answer>'
+REASONING_PATTERN = _PROMPTS["answer_pattern"]
 
 
 # =========================================================
@@ -261,43 +259,16 @@ class ReasonRankReranker(BaseRanking):
 
     def _add_prefix_prompt(self, query: str, num: int) -> str:
         """Generate prefix prompt."""
-        return (
-            f"I will provide you with {num} passages, each indicated by a "
-            f"numerical identifier []. Rank the passages based on their "
-            f"relevance to the search query: {query}.\n"
-        )
+        return REASONRANK_PREFIX_TEMPLATE.format(num=num, query=query)
 
     def _add_post_prompt(self, query: str, num: int) -> str:
         """Generate post prompt based on prompt_mode."""
         example_ordering = "[2] > [1]"
-        if self.prompt_mode == "reasoning":
-            return (
-                f"Search Query: {query}.\n"
-                f"Rank the {num} passages above based on their relevance to "
-                f"the search query. All the passages should be included and "
-                f"listed using identifiers, in descending order of relevance. "
-                f"The format of the answer should be [] > [], e.g., {example_ordering}."
-            )
-        elif self.prompt_mode == "qwen3":
-            return (
-                f"Search Query: {query}.\n"
-                f"Rank the {num} passages above based on their relevance to "
-                f"the search query. All the passages should be included and "
-                f"listed using identifiers, in descending order of relevance. "
-                f"The final ranked list should be enclosed within <answer> </answer> "
-                f"tags, i.e., <answer> ranked list here </answer>. "
-                f"The format of ranked list should be [] > [], e.g., {example_ordering}. "
-                f"Only respond with the ranking results, do not say any word or explain."
-            )
-        else:  # standard
-            return (
-                f"Search Query: {query}.\n"
-                f"Rank the {num} passages above based on their relevance to "
-                f"the search query. All the passages should be included and "
-                f"listed using identifiers, in descending order of relevance. "
-                f"The output format should be [] > [], e.g., {example_ordering}. "
-                f"Only respond with the ranking results, do not say any word or explain."
-            )
+        # any mode other than "reasoning"/"qwen3" falls back to the standard prompt
+        template = REASONRANK_POST_TEMPLATES.get(
+            self.prompt_mode, REASONRANK_POST_TEMPLATES["standard"]
+        )
+        return template.format(query=query, num=num, example_ordering=example_ordering)
 
     def _convert_doc_to_prompt_content(self, text: str, max_length: int) -> str:
         """Truncate document content to max_length tokens."""
@@ -334,7 +305,7 @@ class ReasonRankReranker(BaseRanking):
 
         for rank, text in enumerate(passages, 1):
             content = self._convert_doc_to_prompt_content(text, self.max_passage_length)
-            input_context += f"[{rank}] {content}\n"
+            input_context += REASONRANK_PASSAGE_TEMPLATE.format(rank=rank, content=content)
 
         input_context += self._add_post_prompt(query, num)
         messages.append({"role": "user", "content": input_context})

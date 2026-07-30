@@ -1,0 +1,26 @@
+# rankgpt listwise reranking prompts.
+#
+# Consumed by rankify.models.rankgpt.RankGPT, which builds one chat conversation
+# per sliding window in create_permutation_instruction() / get_prefix_prompt() /
+# get_post_prompt().
+#
+# Turn order produced by the class:
+#   1. system     -> system_message
+#   2. user       -> prefix_message          ({num} passages, {query} search query)
+#   3. assistant  -> assistant_acknowledgement (fixed reply, no placeholders)
+#   4. for each candidate passage, a pair of turns:
+#        user      -> passage_user_template      ({rank} 1-based index, {content}
+#                                                 whitespace-normalised passage text)
+#        assistant -> passage_assistant_template ({rank} same index)
+#   5. user       -> post_message             ({query}, {num} as above)
+#
+# All identifiers are numeric here; RankGPT has no alphabetical variant and no
+# few-shot example injection.
+
+method: rankgpt
+system_message: You are RankGPT, an intelligent assistant that can rank passages based on their relevancy to the query.
+prefix_message: "I will provide you with {num} passages, each indicated by number identifier []. \nRank the passages based on their relevance to query: {query}."
+assistant_acknowledgement: Okay, please provide the passages.
+passage_user_template: '[{rank}] {content}'
+passage_assistant_template: Received passage [{rank}].
+post_message: "Search Query: {query}. \nRank the {num} passages above based on their relevance to search query. The passages should be listed in descending order using identifiers. The most relevant passages should be listed first. The output format should be [] > [], e.g., [1] > [2]. Only response the ranking results, do not say any word or explain."

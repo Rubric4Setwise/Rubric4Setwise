@@ -40,32 +40,20 @@ from tqdm import tqdm
 
 from rankify.models.base import BaseRanking
 from rankify.dataset.dataset import Document
+from rankify.prompts import load_reranker_prompts
 
 
 # =========================================================
 # Prompt Template
+# Text lives in rankify/prompts/reranker_prompts/rubric4setwise.yaml
 # =========================================================
 
-SELECTION_PROMPT = """Your task is to select the minimum set of passages that can fully support answering the search query below.
+_PROMPTS = load_reranker_prompts("rubric4setwise")
 
-Search Query: {query}
-
-Rubric — A structured checklist of information requirements. Each rubric item has three fields:
-- level: evaluation granularity (L1 = per-document quality, L2 = cross-document set quality, L3 = end-to-end answerability).
-- type: the specific quality dimension being checked (e.g., Relevance, Complementarity, Completeness, Density, Reachability).
-- item: a yes/no question that the selected passage set should satisfy.
-
-{rubric}
-
-Candidate Passages (each indicated by a numerical identifier []):
-{context}
-
-Please follow the steps below:
-Step 1. For each rubric item, list which passage(s) contain information that satisfies it. If no passage satisfies a rubric item, write "NOT FOUND".
-Step 2. Select the minimum set of passages that together satisfy ALL rubric items. Each selected passage must contribute at least one rubric item that other selected passages do not cover.
-Step 3. If some rubric items are "NOT FOUND", still include the closest matching passages that partially address those items.
-Step 4. Output the selected passages. The format of final output should be '### Final Selection: [] [].\n', e.g., '### Final Selection: [2] [1].\n'.
-"""
+SELECTION_SYSTEM_PROMPT = _PROMPTS["system_message"]
+SELECTION_PROMPT = _PROMPTS["user_message"]
+RUBRIC_ITEM_TEMPLATE = _PROMPTS["rubric_item_template"]
+CONTEXT_ITEM_TEMPLATE = _PROMPTS["context_item_template"]
 
 
 # =========================================================
@@ -240,7 +228,7 @@ class Rubric4SetwiseReranker(BaseRanking):
         total_tokens = 0
         for j, doc_text in enumerate(doc_texts):
             truncated = self._truncate_doc(doc_text)
-            line = f"[{j+1}] {truncated}"
+            line = CONTEXT_ITEM_TEMPLATE.format(index=j + 1, text=truncated)
             line_tokens = len(self.tokenizer.encode(line, add_special_tokens=False))
             if total_tokens + line_tokens > max_tokens and lines:
                 break
@@ -251,9 +239,10 @@ class Rubric4SetwiseReranker(BaseRanking):
     def _build_selection_prompt(self, query: str, doc_texts: List[str],
                                 rubric_items: List[str]) -> str:
         context = self._format_context(doc_texts)
-        rubric_text = '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rubric_items)])
+        rubric_text = '\n'.join([RUBRIC_ITEM_TEMPLATE.format(index=i + 1, item=q)
+                                 for i, q in enumerate(rubric_items)])
         messages = [
-            {"role": "system", "content": "You are a helpful assistant that selects relevant passages to answer queries."},
+            {"role": "system", "content": SELECTION_SYSTEM_PROMPT},
             {"role": "user", "content": SELECTION_PROMPT.format(
                 query=query, rubric=rubric_text, context=context,
             )},

@@ -11,6 +11,7 @@ from ftfy import fix_text
 from tqdm import tqdm
 from transformers.generation import GenerationConfig
 
+from rankify.prompts import load_reranker_prompts
 from rankify.utils.models.rank_llm.data import Request, Result
 from rankify.utils.models.rank_llm.rerank import PromptMode
 
@@ -50,6 +51,7 @@ class RankListwiseOSLLM(ListwiseRankLLM):
         vllm_batched: bool = False,
         sglang_batched: bool = False,
         gpu_memory_utilization: float = 0.9,
+        prompt_profile: str = "rankzephyr",
     ) -> None:
         """
          Creates instance of the RankListwiseOSLLM class, an extension of RankLLM designed for performing listwise ranking of passages using a specified language model. Advanced configurations are supported such as GPU acceleration, variable passage handling, and custom system messages for generating prompts.
@@ -71,6 +73,10 @@ class RankListwiseOSLLM(ListwiseRankLLM):
          instructions or context. Defaults to None.
          - vllm_batched (bool, optional): Indicates whether batched inference using VLLM is leveraged. Defaults to False.
          - sglang_batched (bool, optional): Indicates whether batched inference using SGLang is leveraged. Defaults to False.
+         - prompt_profile (str, optional): Stem of the prompt YAML under rankify/prompts/reranker_prompts/
+         holding this preset's listwise templates ('rankzephyr' or 'rankvicuna'). Defaults to 'rankzephyr';
+         both profiles carry byte-identical listwise templates, they differ only in the default system message,
+         which callers pass in explicitly via system_message.
 
          Raises:
          - AssertionError: If CUDA is specified as the device but is not available on the system.
@@ -92,6 +98,7 @@ class RankListwiseOSLLM(ListwiseRankLLM):
         self._variable_passages = variable_passages
         self._system_message = system_message
         self._output_token_estimate = None
+        self._prompts = load_reranker_prompts(prompt_profile)
 
         if num_few_shot_examples > 0:
             with open("data/output_v2_aug_filtered.jsonl", "r") as json_file:
@@ -317,17 +324,20 @@ class RankListwiseOSLLM(ListwiseRankLLM):
         return _output_token_estimate
 
     def _add_prefix_prompt(self, query: str, num: int, use_alpha: bool = False) -> str:
+        prefix = self._prompts["prefix_message"]
         if use_alpha:
-            return f"I will provide you with {num} passages, each indicated by a alphabetical identifier []. Rank the passages based on their relevance to the search query: {query}.\n"
+            return prefix["alpha"].format(num=num, query=query)
         else:
-            return f"I will provide you with {num} passages, each indicated by a numerical identifier []. Rank the passages based on their relevance to the search query: {query}.\n"
+            return prefix["numeric"].format(num=num, query=query)
 
     def _add_post_prompt(self, query: str, num: int, use_alpha: bool = False) -> str:
-        if use_alpha:
-            example_ordering = "[B] > [A]" if self._variable_passages else "[D] > [B]"
-        else:
-            example_ordering = "[2] > [1]" if self._variable_passages else "[4] > [2]"
-        return f"Search Query: {query}.\nRank the {num} passages above based on their relevance to the search query. All the passages should be included and listed using identifiers, in descending order of relevance. The output format should be [] > [], e.g., {example_ordering}, Only respond with the ranking results, do not say any word or explain."
+        post = self._prompts["post_message"]
+        style = "alpha" if use_alpha else "numeric"
+        count = "variable" if self._variable_passages else "fixed"
+        example_ordering = post["example_ordering"][f"{style}_{count}"]
+        return post["template"].format(
+            query=query, num=num, example_ordering=example_ordering
+        )
 
     def _add_few_shot_examples(self, conv):
         for _ in range(self._num_few_shot_examples):
@@ -370,7 +380,9 @@ class RankListwiseOSLLM(ListwiseRankLLM):
                     content = self.convert_doc_to_prompt_content(cand["doc"], max_length)
                     
                     identifier = chr(ALPH_START_IDX + rank) if use_alpha else str(rank)
-                    input_context += f"[{identifier}] {self._replace_number(content)}\n"
+                    input_context += self._prompts["passage_template"].format(
+                        identifier=identifier, content=self._replace_number(content)
+                    )
 
                 input_context += self._add_post_prompt(query, num, use_alpha=use_alpha)
                 messages.append({"role": "user", "content": input_context})
@@ -416,7 +428,9 @@ class RankListwiseOSLLM(ListwiseRankLLM):
                     content = self.convert_doc_to_prompt_content(cand["doc"], max_length)
 
                     identifier = chr(ALPH_START_IDX + rank) if use_alpha else str(rank)
-                    input_context += f"[{identifier}] {self._replace_number(content)}\n"
+                    input_context += self._prompts["passage_template"].format(
+                        identifier=identifier, content=self._replace_number(content)
+                    )
 
                 input_context += self._add_post_prompt(query, num, use_alpha=use_alpha)
                 conv.append_message(conv.roles[0], input_context)

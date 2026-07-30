@@ -326,6 +326,11 @@ def run_ranking(reranker_choice: str, gpu_id, input_file: str,
         process_data = process_data[start_idx:end_idx]
         print(f"  [DATA-PARALLEL] Processing [{start_idx}:{end_idx}] = {len(process_data)} entries (Shard {shard_id})")
 
+    if not process_data:
+        print(f"  [WARN] No entries assigned to this shard; writing empty cache without loading the model.")
+        save_jsonl([], ranker_cache_file)
+        return
+
     if is_bm25_baseline:
         print(f"  [BM25-BASELINE] Using original BM25 order, top-{top_k} docs for generation (no reranker)")
         for entry in process_data:
@@ -918,10 +923,17 @@ def run_generation(reranker_choice: str, generator_model: str, gpu_id,
                    top_k: int = None, evaluate_metrics: bool = None,
                    save_individual_scores: bool = None,
                    max_tokens: int = None, temperature: float = None,
-                   top_p: float = None, repetition_penalty: float = None):
+                   top_p: float = None, repetition_penalty: float = None,
+                   shard_id: int = None, num_shards: int = None):
     """
     Execute a single reranker+generator combination generation task on the specified GPU.
     Supports multi-GPU format gpu_id="0,1".
+
+    Data-parallel mode (shard_id + num_shards):
+        Generates answers only for the [shard_id/num_shards] slice of the data,
+        writes them to output_shard_{shard_id}.jsonl and skips metrics, which
+        have to be computed on the full set once every shard has finished.
+        Use the `merge-gen-shards` sub-command to combine and evaluate.
     """
     # Apply defaults
     generator_method = generator_method or DEFAULT_GENERATOR_METHOD
@@ -961,7 +973,17 @@ def run_generation(reranker_choice: str, generator_model: str, gpu_id,
     generator_dir_name = generator_model.replace("/", "_")
     output_subdir = os.path.join(output_dir, reranker_choice, generator_dir_name)
     os.makedirs(output_subdir, exist_ok=True)
-    output_file = os.path.join(output_subdir, OUTPUT_FILENAME)
+
+    # Data-parallel mode: shard-specific output, evaluation deferred to merge
+    is_sharded = (shard_id is not None and num_shards is not None)
+    if is_sharded:
+        output_file = os.path.join(output_subdir, f"output_shard_{shard_id}.jsonl")
+        print(f"  [DATA-PARALLEL] Shard {shard_id}/{num_shards} -> {output_file}")
+        if evaluate_metrics:
+            evaluate_metrics = False
+            print(f"  [DATA-PARALLEL] Metrics deferred to merge-gen-shards (needs the full set)")
+    else:
+        output_file = os.path.join(output_subdir, OUTPUT_FILENAME)
 
     # Check if already completed
     if os.path.exists(output_file):
@@ -990,6 +1012,21 @@ def run_generation(reranker_choice: str, generator_model: str, gpu_id,
         entry["context_for_generator"] = cached_entry.get("context_for_generator", [])
         if "ranker_evaluation" in cached_entry:
             entry["ranker_evaluation"] = cached_entry["ranker_evaluation"]
+
+    # Shard AFTER merging the ranker cache, so every entry keeps the contexts
+    # that the ranking phase produced for it.
+    if is_sharded:
+        total_data_count = len(process_data)
+        shard_size = math.ceil(total_data_count / num_shards)
+        start_idx = shard_id * shard_size
+        end_idx = min(start_idx + shard_size, total_data_count)
+        process_data = process_data[start_idx:end_idx]
+        print(f"  [DATA-PARALLEL] Generating for [{start_idx}:{end_idx}] = {len(process_data)} entries")
+
+    if not process_data:
+        print(f"  [WARN] No entries assigned to this shard; writing empty output.")
+        save_jsonl([], output_file)
+        return
 
     # Rebuild reranked_documents from cache
     documents = [convert_entry_to_document(entry) for entry in process_data]
@@ -1120,6 +1157,132 @@ def run_generation(reranker_choice: str, generator_model: str, gpu_id,
 
 
 # ============================================================
+# Merge Generation Shards
+# ============================================================
+def merge_gen_shards(reranker_choice: str, generator_model: str, output_dir: str,
+                     num_shards: int, cleanup: bool = True, top_k: int = None,
+                     evaluate_metrics: bool = None, save_individual_scores: bool = None):
+    """
+    Merge data-parallel generation shards into the final output.jsonl and score
+    them on the full set.
+
+    Per-shard scores cannot be averaged back into a corpus-level number, so
+    every metric is (re)computed here over all merged entries.
+    """
+    top_k = top_k if top_k is not None else DEFAULT_TOP_K
+    evaluate_metrics = evaluate_metrics if evaluate_metrics is not None else DEFAULT_EVALUATE_METRICS
+    save_individual_scores = save_individual_scores if save_individual_scores is not None else DEFAULT_SAVE_INDIVIDUAL_SCORES
+
+    generator_dir_name = generator_model.replace("/", "_")
+    output_subdir = os.path.join(output_dir, reranker_choice, generator_dir_name)
+    output_file = os.path.join(output_subdir, OUTPUT_FILENAME)
+
+    if os.path.exists(output_file):
+        print(f"  [SKIP] Merged file already exists: {output_file}")
+        return
+
+    print(f"\n{'=' * 60}")
+    print(f"[MERGE-GEN] {reranker_choice} + {generator_model}: {num_shards} shards")
+    print(f"{'=' * 60}")
+
+    merged_data = []
+    missing_shards = []
+    for sid in range(num_shards):
+        shard_file = os.path.join(output_subdir, f"output_shard_{sid}.jsonl")
+        if not os.path.exists(shard_file):
+            missing_shards.append(sid)
+            continue
+        shard_data = load_jsonl(shard_file)
+        print(f"  Shard {sid}: {len(shard_data)} entries")
+        merged_data.extend(shard_data)
+
+    if missing_shards:
+        print(f"  [ERROR] Missing shards: {missing_shards}")
+        print(f"  Wait for every shard to finish before merging.")
+        return
+
+    _, is_set_selection = resolve_reranker_meta(reranker_choice)
+
+    if evaluate_metrics:
+        print(f"  Computing generation metrics over {len(merged_data)} entries...")
+
+        eval_documents = []
+        answers = []
+        for entry in merged_data:
+            if is_set_selection:
+                docs_for_eval = entry.get("selected_docs", [])
+            else:
+                docs_for_eval = entry.get("context_for_generator", [])[:top_k]
+
+            eval_contexts = [
+                Context(
+                    id=str(d["original_id"]) if d.get("original_id") is not None else None,
+                    title="",
+                    text=d.get("doc", ""),
+                    score=d.get("score", 0.0) if is_set_selection else 0.0,
+                )
+                for d in docs_for_eval
+            ]
+            eval_documents.append(Document(
+                question=Question(entry.get("question", "")),
+                answers=Answer([entry.get("answer", "")]),
+                contexts=eval_contexts,
+            ))
+            answers.append(entry.get("generated_answer", ""))
+
+        metrics = Metrics(eval_documents)
+        evaluation_results = metrics.calculate_generation_metrics(answers)
+
+        print(f"  Generation evaluation results:")
+        for metric, score in evaluation_results.items():
+            print(f"    {metric}: {score:.2f}%")
+
+        if save_individual_scores:
+            data_obj = type("Data", (object,), {
+                "documents": eval_documents,
+                "predictions": answers
+            })()
+
+            from rankify.metrics.metrics import ExactMatch, F1Score, ContainsMatch
+
+            em_metric = ExactMatch({"dataset_name": "QA_Evaluation"})
+            _, individual_em = em_metric.calculate_metric(data_obj)
+
+            f1_metric = F1Score({"dataset_name": "QA_Evaluation"})
+            _, individual_f1 = f1_metric.calculate_metric(data_obj)
+
+            contains_metric = ContainsMatch({"dataset_name": "QA_Evaluation"})
+            _, individual_contains = contains_metric.calculate_metric(data_obj)
+
+            for i, entry in enumerate(merged_data):
+                entry["evaluation_scores"] = {
+                    "exact_match": float(individual_em[i]) * 100,
+                    "f1_score": float(individual_f1[i]) * 100,
+                    "contains_match": float(individual_contains[i]) * 100
+                }
+
+        eval_summary_file = output_file.replace(".jsonl", "_eval_summary.json")
+        with open(eval_summary_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "total_samples": len(merged_data),
+                "evaluation_metrics": evaluation_results,
+            }, f, ensure_ascii=False, indent=2)
+        print(f"  ✓ Eval summary: {eval_summary_file}")
+
+    save_jsonl(merged_data, output_file)
+    print(f"  ✓ Merged {len(merged_data)} entries to: {output_file}")
+
+    if cleanup:
+        for sid in range(num_shards):
+            shard_file = os.path.join(output_subdir, f"output_shard_{sid}.jsonl")
+            if os.path.exists(shard_file):
+                os.remove(shard_file)
+        print(f"  ✓ Cleaned up shard files")
+
+    print(f"  [DONE] {reranker_choice} + {generator_model} merge complete!")
+
+
+# ============================================================
 # Summarize Phase
 # ============================================================
 def run_summarize(input_file: str, output_dir: str, num_entries: str,
@@ -1237,11 +1400,15 @@ Examples:
   python run_pipeline.py rank --reranker rankllama --gpu 2 --shard-id 2 --num-shards 4
   python run_pipeline.py rank --reranker rankllama --gpu 3 --shard-id 3 --num-shards 4
 
-  # Merge shards
+  # Merge ranking shards
   python run_pipeline.py merge-shards --reranker rankllama --num-shards 4
 
-  # Generation
-  python run_pipeline.py generate --reranker rankllama --generator meta-llama/Llama-3.1-8B-Instruct --gpu 0
+  # Generation (single GPU)
+  python run_pipeline.py generate --reranker rankllama --generator Qwen/Qwen3-8B --gpu 0
+
+  # Data-parallel generation (4 GPUs, 4 shards) then merge + score on the full set
+  python run_pipeline.py generate --reranker rankllama --generator Qwen/Qwen3-8B --gpu 0 --shard-id 0 --num-shards 4
+  python run_pipeline.py merge-gen-shards --reranker rankllama --generator Qwen/Qwen3-8B --num-shards 4
 
   # Summarize
   python run_pipeline.py summarize
@@ -1286,6 +1453,21 @@ Examples:
     gen_parser.add_argument("--temperature", type=float, default=None, help="Temperature for generation sampling")
     gen_parser.add_argument("--top-p", type=float, default=None, help="Top-p for generation sampling")
     gen_parser.add_argument("--repetition-penalty", type=float, default=None, help="Repetition penalty for generation sampling")
+    gen_parser.add_argument("--shard-id", type=int, default=None, help="Data shard ID (0-indexed) for data-parallel mode")
+    gen_parser.add_argument("--num-shards", type=int, default=None, help="Total number of shards for data-parallel mode")
+
+    # merge-gen-shards sub-command
+    merge_gen_parser = subparsers.add_parser("merge-gen-shards", help="Merge data-parallel generation shards and score the full set")
+    merge_gen_parser.add_argument("--reranker", required=True, help="Reranker name")
+    merge_gen_parser.add_argument("--generator", required=True, help="Generator model name")
+    merge_gen_parser.add_argument("--output-dir", default=OUTPUT_DIR, help="Output directory")
+    merge_gen_parser.add_argument("--num-shards", type=int, required=True, help="Total number of shards")
+    merge_gen_parser.add_argument("--no-cleanup", action="store_true", help="Do not delete shard files after merging")
+    merge_gen_parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K, help="Top-K contexts used for evaluation")
+    merge_gen_parser.add_argument("--evaluate-metrics", action="store_true", default=DEFAULT_EVALUATE_METRICS, help="Run evaluation after merge")
+    merge_gen_parser.add_argument("--no-evaluate-metrics", action="store_false", dest="evaluate_metrics", help="Skip evaluation after merge")
+    merge_gen_parser.add_argument("--save-individual-scores", action="store_true", default=DEFAULT_SAVE_INDIVIDUAL_SCORES, help="Save per-sample scores")
+    merge_gen_parser.add_argument("--no-save-individual-scores", action="store_false", dest="save_individual_scores", help="Disable per-sample scores")
 
     # merge-shards sub-command
     merge_parser = subparsers.add_parser("merge-shards", help="Merge data-parallel shard results")
@@ -1348,6 +1530,19 @@ if __name__ == "__main__":
             temperature=args.temperature,
             top_p=args.top_p,
             repetition_penalty=args.repetition_penalty,
+            shard_id=args.shard_id,
+            num_shards=args.num_shards,
+        )
+    elif args.command == "merge-gen-shards":
+        merge_gen_shards(
+            reranker_choice=args.reranker,
+            generator_model=args.generator,
+            output_dir=args.output_dir,
+            num_shards=args.num_shards,
+            cleanup=not args.no_cleanup,
+            top_k=args.top_k,
+            evaluate_metrics=args.evaluate_metrics,
+            save_individual_scores=args.save_individual_scores,
         )
     elif args.command == "merge-shards":
         merge_shards(
@@ -1371,6 +1566,6 @@ if __name__ == "__main__":
             generators=args.generators,
         )
     else:
-        print("Please specify a sub-command: rank / generate / merge-shards / summarize")
+        print("Please specify a sub-command: rank / generate / merge-shards / merge-gen-shards / summarize")
         print("Use --help for details")
         sys.exit(1)
